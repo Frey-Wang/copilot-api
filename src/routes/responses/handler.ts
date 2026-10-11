@@ -44,6 +44,7 @@ import {
   filterReasoningForTransport,
   getResponsesTransportForModel,
   getResponsesRequestOptions,
+  normalizeGuardianAgentMessages,
   normalizeInputImageDetails,
   normalizeResponsesReasoningEffort,
   sanitizeOversizedInputImages,
@@ -100,7 +101,8 @@ export const handleResponses = async (c: Context) => {
 
   const incomingSessionId = getIncomingResponsesSessionId(c)
   const sessionId = incomingSessionId ? getUUID(incomingSessionId) : undefined
-  const threadId = c.req.header("thread-id")
+  const threadId =
+    c.req.header("thread-id") ?? c.req.header("x-opencode-session-id")
   const requestId =
     threadId ?
       getUUID(threadId + "_")
@@ -162,6 +164,13 @@ export const handleResponses = async (c: Context) => {
     fallbackSessionId,
     model: payload.model,
   })
+
+  const normalizedAgentMessageCount = normalizeGuardianAgentMessages(payload)
+  if (normalizedAgentMessageCount > 0) {
+    logger.debug(
+      `Translated ${normalizedAgentMessageCount} Guardian agent message(s) to user messages before forwarding to Copilot Responses`,
+    )
+  }
 
   const sanitizedUnsupportedFieldCount = sanitizeUnsupportedInputFields(payload)
   if (sanitizedUnsupportedFieldCount > 0) {

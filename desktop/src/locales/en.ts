@@ -1,25 +1,48 @@
 import type { Locale } from './index'
 
 const en: Locale = {
+  updates: {
+    title: 'Updates',
+    description:
+      'Check for updates on launch and every 6 hours. Windows and Linux AppImage updates download automatically. Unsigned macOS builds use manual DMG installation.',
+    currentVersion: 'Current version: {{version}}',
+    idle: 'Ready to check for updates',
+    checking: 'Checking for updates…',
+    'not-available': 'No newer release is available for this platform',
+    available: 'Version {{version}} is available',
+    downloading: 'Downloading {{version}} — {{percent}}%',
+    downloaded: 'Version {{version}} is ready to install',
+    installing: 'Stopping the server and installing…',
+    error: 'Update failed. Check your connection and try again.',
+    disabled: 'Updates are available in packaged builds only',
+    check: 'Check for updates',
+    restartInstall: 'Restart and install',
+    openRelease: 'Download installer',
+    manualInstall: 'Download and install the package from GitHub Releases.',
+    restartNote:
+      'Restarting stops the local API server and interrupts active requests.',
+    progress: 'Update download progress',
+    actionFailed: 'Could not complete the update action. Please try again.',
+  },
   providers: {
     title: 'Providers',
     close: 'Close',
     description:
-      'Enable providers for all clients and choose which models appear in Codex.',
+      'Enable providers for all clients and choose which models appear in coding agents.',
     configured: 'Your providers',
-    catalogBudget: '1 MiB catalog',
     unsaved: 'Unsaved changes',
     autoDescription: 'Use discovered models',
     selectedDescription: 'Choose your models',
-    noneDescription: 'Hide from Codex',
-    hiddenTitle: 'No models shown in Codex',
-    hiddenDescription: 'This visibility setting applies only to Codex.',
+    noneDescription: 'Hide from coding agents',
+    hiddenTitle: 'No models shown in Coding Agent',
+    hiddenDescription:
+      'This visibility setting applies to Codex and Claude Code.',
     availableCount: '{count} discovered',
     loading: 'Loading providers…',
     empty: 'No providers configured. Add one from the authorization page.',
     enabled: 'Enabled',
     disabled: 'Disabled',
-    selection: 'Models shown in Codex',
+    selection: 'Models shown in Coding Agent',
     auto: 'Automatic',
     selected: 'Selected models',
     none: 'Hide all models',
@@ -45,6 +68,14 @@ const en: Locale = {
     subtitle: 'Choose a provider to authorize or configure',
     githubAuth: 'Sign in with GitHub',
     codexAuth: 'Sign in with OpenAI Codex',
+    xaiAuth: 'Sign in with xAI (SuperGrok)',
+    xaiAccounts: 'xAI accounts',
+    xaiNoAccounts: 'No xAI accounts added yet',
+    waitingXaiAuth:
+      'Open the authorization page and enter the code to sign in with your SuperGrok subscription.',
+    xaiLoginInProgress: 'xAI sign-in is already in progress.',
+    xaiAuthExpired: 'xAI authorization expired. Please sign in again.',
+    xaiAuthDenied: 'xAI authorization was denied. Please sign in again.',
     codexAccounts: 'Codex accounts',
     codexAccountAlias: 'Account alias (optional)',
     codexAccountAliasPlaceholder: 'For example: Work',
@@ -81,8 +112,13 @@ const en: Locale = {
     providerType: 'Provider type',
     deviceCode: 'Authorization code',
     deviceCodeUrl: 'Authorization URL',
-    codexCallbackRequired:
-      'Authorization did not finish. Retry or go back to start over',
+    codexAuthTimeout:
+      'Codex authorization timed out after 2 minutes. Choose “Add or sign in again” to retry.',
+    codexCallbackUnavailable:
+      'Could not start the local authorization listener on port 1455. Close other Codex sign-ins and choose “Add or sign in again” to retry.',
+    codexLoginInProgress: 'Codex sign-in is already in progress.',
+    codexFinishingAuth:
+      'Finishing sign-in… Authorization can no longer be cancelled.',
     copy: 'Copy',
     copied: '✓ Copied',
     openAuthPage: 'Open authorization page',
@@ -93,7 +129,10 @@ const en: Locale = {
     confirmAdd: 'Confirm',
     authFailed: 'Authorization failed, please try again',
     tokenInvalid: 'Invalid token, please try again',
-    waitingCodexAuth: 'Waiting for Codex authorization…',
+    waitingCodexAuth:
+      'Open the authorization page in your browser and finish within 2 minutes.',
+    cancelCodexAuth: 'Cancel authorization',
+    cancelling: 'Cancelling…',
     loginConsent: 'By signing in you authorize access to Copilot API',
   },
   dashboard: {
@@ -118,6 +157,8 @@ const en: Locale = {
     authHeader: 'Auth header',
     copy: 'Copy',
     quotaUsage: 'Quota usage',
+    quotaUsedPercent: '{{percent}}% used',
+    quotaRemainingPercent: '{{percent}}% remaining',
     refreshing: 'Refreshing…',
     refresh: 'Refresh',
     tokenUsage: 'Token usage',
@@ -125,6 +166,7 @@ const en: Locale = {
     tokenUsageCache: 'Cache',
     tokenUsageCacheRead: 'Cache read',
     tokenUsageCacheWrite: 'Cache write',
+    tokenUsageCacheHitRate: 'Cache hit rate',
     tokenUsageCost: 'Cost',
     tokenUsageEndpoint: 'Endpoint',
     tokenUsageEvents: 'Event details',
@@ -180,6 +222,7 @@ const en: Locale = {
   menu: {
     file: 'File',
     fileSettings: 'Settings',
+    fileAuthConfig: 'Auth config',
     fileQuit: 'Quit',
     view: 'View',
     viewReload: 'Reload',

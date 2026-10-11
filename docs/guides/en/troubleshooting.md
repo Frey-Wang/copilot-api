@@ -8,17 +8,9 @@
 
 **GitHub Copilot encrypted output decryption failure**
 
-When the GitHub Copilot provider returns or logs `Encrypted function output content could not be decrypted or decoded`, it is usually an upstream issue. Set `useResponsesApiWebSocket` to `false` in `config.json` so Copilot Responses traffic goes over HTTP `/responses` instead:
+The gateway normalizes agent messages in Guardian JSON-schema requests before forwarding them to GitHub Copilot. Other requests can still receive `Encrypted function output content could not be decrypted or decoded` when the upstream rejects encrypted history.
 
-```json
-{
-  "useResponsesApiWebSocket": false
-}
-```
-
-Restart the server after changing the config. See [Configuration (config.json)](configuration.md#configuration-configjson) for the full option reference.
-
-If this error continues with WebSocket disabled, try a fresh Codex conversation and newly created subagents instead of resuming the failing handoff history. The upstream may be rejecting encrypted history; repeating the same request does not repair that history. Successful reuse of a payload followed by rejection does not establish the upstream encryption key lifetime or scope.
+If this error persists, try a fresh Codex conversation and newly created subagents instead of resuming the failing handoff history. Repeating the same request does not repair that history. Successful reuse of a payload followed by rejection does not establish the upstream encryption key lifetime or scope.
 
 The upstream can send `response.failed` with no error details, followed by an `error` event containing `invalid_request_body` and the decryption message. Codex may stop at the failed event and display only `stream disconnected before completion: response.failed event received`. For HTTP streams, the gateway waits up to one second for the next event and attaches its error details to an otherwise empty failed response.
 

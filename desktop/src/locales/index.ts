@@ -2,12 +2,32 @@ import en from './en'
 import zh from './zh'
 
 export interface Locale {
+  updates: {
+    title: string
+    description: string
+    currentVersion: string
+    idle: string
+    checking: string
+    'not-available': string
+    available: string
+    downloading: string
+    downloaded: string
+    installing: string
+    error: string
+    disabled: string
+    check: string
+    restartInstall: string
+    openRelease: string
+    manualInstall: string
+    restartNote: string
+    progress: string
+    actionFailed: string
+  }
   providers: {
     title: string
     close: string
     description: string
     configured: string
-    catalogBudget: string
     unsaved: string
     autoDescription: string
     selectedDescription: string
@@ -42,6 +62,13 @@ export interface Locale {
     subtitle: string
     githubAuth: string
     codexAuth: string
+    xaiAuth: string
+    xaiAccounts: string
+    xaiNoAccounts: string
+    waitingXaiAuth: string
+    xaiLoginInProgress: string
+    xaiAuthExpired: string
+    xaiAuthDenied: string
     codexAccounts: string
     codexAccountAlias: string
     codexAccountAliasPlaceholder: string
@@ -75,7 +102,10 @@ export interface Locale {
     providerType: string
     deviceCode: string
     deviceCodeUrl: string
-    codexCallbackRequired: string
+    codexAuthTimeout: string
+    codexCallbackUnavailable: string
+    codexLoginInProgress: string
+    codexFinishingAuth: string
     copy: string
     copied: string
     openAuthPage: string
@@ -87,6 +117,8 @@ export interface Locale {
     authFailed: string
     tokenInvalid: string
     waitingCodexAuth: string
+    cancelCodexAuth: string
+    cancelling: string
     loginConsent: string
   }
   dashboard: {
@@ -111,6 +143,8 @@ export interface Locale {
     authHeader: string
     copy: string
     quotaUsage: string
+    quotaUsedPercent: string
+    quotaRemainingPercent: string
     refreshing: string
     refresh: string
     tokenUsage: string
@@ -118,6 +152,7 @@ export interface Locale {
     tokenUsageCache: string
     tokenUsageCacheRead: string
     tokenUsageCacheWrite: string
+    tokenUsageCacheHitRate: string
     tokenUsageCost: string
     tokenUsageEndpoint: string
     tokenUsageEvents: string
@@ -173,6 +208,7 @@ export interface Locale {
   menu: {
     file: string
     fileSettings: string
+    fileAuthConfig: string
     fileQuit: string
     view: string
     viewReload: string

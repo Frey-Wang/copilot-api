@@ -8,13 +8,20 @@ import {
 } from '../components/TokenUsageMetric'
 import { useLanguage } from '../contexts/LanguageContext'
 import {
+  getCopilotQuotaPercentRemaining,
+  getCopilotQuotaRemaining,
   getNonEmptyUsageText,
   getPremiumUsedText,
   hasCopilotQuotaValue,
   shouldShowCopilotQuotaUsage,
   shouldShowCopilotUsageSummary,
+  type CopilotQuotaDetailLike,
 } from '../lib/copilot-usage-display'
-import { formatTokenCost, formatTokenCosts } from '../lib/token-usage-format'
+import {
+  formatCacheHitRate,
+  formatTokenCost,
+  formatTokenCosts,
+} from '../lib/token-usage-format'
 import { buildServerBaseUrl } from '../lib/server-url'
 import ModelMappingsPage from './ModelMappingsPage'
 import ProviderManagementPanel from '../components/ProviderManagementPanel'
@@ -39,11 +46,7 @@ interface DashboardPageProps {
   onChangeAuth: () => void
 }
 
-interface QuotaDetail {
-  entitlement: number
-  quota_remaining: number
-  unlimited: boolean
-}
+type QuotaDetail = CopilotQuotaDetailLike
 
 interface UsageInfo {
   copilot_plan?: string
@@ -211,17 +214,6 @@ const IconLogs = () => (
   </svg>
 )
 
-function calcUsedPct(q: QuotaDetail): number {
-  if (q.unlimited || q.entitlement === 0) return 0
-  const used = q.entitlement - q.quota_remaining
-  return Math.min(100, Math.round((used / q.entitlement) * 100))
-}
-
-function calcRemainingPct(q: QuotaDetail): number {
-  if (q.unlimited || q.entitlement === 0) return 100
-  return Math.min(100, Math.round((q.quota_remaining / q.entitlement) * 100))
-}
-
 function getQuotaBarColor(pct: number, isUsed: boolean): string {
   if (isUsed) {
     if (pct >= 80) return 'bg-red-500'
@@ -355,7 +347,14 @@ export default function DashboardPage({
   // Watch server status changes and only surface unexpected stops.
   useEffect(() => {
     const unsubscribe = window.electronAPI.onServerStatus((status) => {
+      if (status.restarting) {
+        setRestarting(true)
+        setStartError('')
+        setServerError('')
+        return
+      }
       if (status.running) {
+        setRestarting(false)
         if (status.port) setPort(String(status.port))
         if (status.host !== undefined) setHost(status.host)
         setStarted(true)
@@ -365,7 +364,13 @@ export default function DashboardPage({
       }
       if (!status.running) {
         if (!intentionalStop.current) {
-          setServerError(status.error ?? t('dashboard.serverUnexpectedStop'))
+          setRestarting(false)
+          setServerError(
+            status.error
+              ?? (status.intentional ? '' : (
+                t('dashboard.serverUnexpectedStop')
+              )),
+          )
           setStarted(false)
           void window.electronAPI
             .getLogs()
@@ -402,17 +407,18 @@ export default function DashboardPage({
 
   // Fetch dashboard and token usage data after the server starts.
   useEffect(() => {
-    if (started) {
+    if (started && !restarting) {
       void fetchData()
       void fetchTokenUsageData(tokenUsagePeriod, tokenUsageEventsPage)
     }
-  }, [started])
+  }, [started, restarting])
 
   useEffect(() => {
     if (!started) {
       setServerAuthInfo({ enabled: false })
       return
     }
+    if (restarting) return
 
     window.electronAPI
       .getServerAuthInfo()
@@ -420,7 +426,7 @@ export default function DashboardPage({
       .catch(() => {
         setServerAuthInfo({ enabled: false })
       })
-  }, [started])
+  }, [started, restarting])
 
   const refreshAuthMode = async () => {
     const status = await window.electronAPI.getAuthStatus()
@@ -653,12 +659,13 @@ export default function DashboardPage({
   const handleTokenUsagePeriodChange = (nextPeriod: TokenUsagePeriod) => {
     setTokenUsagePeriod(nextPeriod)
     setTokenUsageEventsPage(1)
-    if (started) void fetchTokenUsageData(nextPeriod, 1)
+    if (started && !restarting) void fetchTokenUsageData(nextPeriod, 1)
   }
 
   const handleTokenUsageEventsPageChange = (nextPage: number) => {
     setTokenUsageEventsPage(nextPage)
-    if (started) void fetchTokenUsageEvents(tokenUsagePeriod, nextPage)
+    if (started && !restarting)
+      void fetchTokenUsageEvents(tokenUsagePeriod, nextPage)
   }
 
   const handleRefreshActiveTab = () => {
@@ -726,7 +733,8 @@ export default function DashboardPage({
     {
       label: t('dashboard.overviewStatus'),
       tone: 'green',
-      value: t('dashboard.overviewRunning'),
+      value:
+        restarting ? t('header.restarting') : t('dashboard.overviewRunning'),
     },
     {
       label: t('dashboard.overviewPort'),
@@ -826,7 +834,7 @@ export default function DashboardPage({
         {showRefreshButton && (
           <button
             onClick={handleRefreshActiveTab}
-            disabled={isActiveTabRefreshing}
+            disabled={isActiveTabRefreshing || restarting}
             className="inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 text-[13px] text-ink-soft transition-colors hover:bg-sunken hover:text-ink disabled:opacity-40"
           >
             <IconRefresh spinning={isActiveTabRefreshing} />
@@ -1211,23 +1219,30 @@ function QuotaBar({
   loading: boolean
   mode: 'used' | 'remaining'
 }) {
-  const pct =
-    quota ?
-      mode === 'used' ?
-        calcUsedPct(quota)
-      : calcRemainingPct(quota)
-    : 0
+  const { t } = useLanguage()
+  const remainingPct = quota ? getCopilotQuotaPercentRemaining(quota) : 0
+  const pct = quota && mode === 'used' ? 100 - remainingPct : remainingPct
   const colorClass = getQuotaBarColor(pct, mode === 'used')
 
   let displayText = '—'
   if (quota) {
+    const entitlement = quota.entitlement ?? 0
+    const remaining = getCopilotQuotaRemaining(quota) ?? 0
     if (quota.unlimited) {
       displayText = '∞'
     } else if (mode === 'used') {
-      const used = Math.floor(quota.entitlement - quota.quota_remaining)
-      displayText = `${used} / ${Math.floor(quota.entitlement)}`
+      const used = Math.floor(entitlement - remaining)
+      displayText = `${used} / ${Math.floor(entitlement)}`
     } else {
-      displayText = `${Math.floor(quota.quota_remaining)} / ${Math.floor(quota.entitlement)}`
+      displayText = `${Math.floor(remaining)} / ${Math.floor(entitlement)}`
+    }
+    if (!quota.unlimited) {
+      displayText += ` · ${t(
+        mode === 'used' ?
+          'dashboard.quotaUsedPercent'
+        : 'dashboard.quotaRemainingPercent',
+        { percent: pct.toFixed(1) },
+      )}`
     }
   }
 
@@ -1279,6 +1294,7 @@ function TokenUsagePanel({
 }) {
   const [trendModel, setTrendModel] = useState(ALL_MODELS_VALUE)
   const totals = tokenUsage?.totals ?? EMPTY_TOKEN_USAGE_TOTALS
+  const costCurrencies = [...new Set(totals.costs.map((cost) => cost.currency))]
   const periods: Array<{ key: TokenUsagePeriod; label: string }> = [
     { key: 'today', label: t('dashboard.tokenUsagePeriodToday') },
     { key: 'this_week', label: t('dashboard.tokenUsagePeriodThisWeek') },
@@ -1318,7 +1334,7 @@ function TokenUsagePanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-6 gap-2">
         <TokenUsageMetric
           label={t('dashboard.tokenUsageTotal')}
           value={formatTokenCount(calcTokenTotal(totals))}
@@ -1350,16 +1366,34 @@ function TokenUsagePanel({
           tone="amber"
         />
         <TokenUsageMetric
+          label={t('dashboard.tokenUsageCacheHitRate')}
+          value={formatCacheHitRate(totals)}
+          loading={loading}
+          tone="cyan"
+        />
+        <TokenUsageMetric
           label={t('dashboard.tokenUsageRequests')}
           value={formatTokenCount(totals.request_count)}
           loading={loading}
           tone="violet"
         />
-        <TokenUsageCostMetric
-          label={t('dashboard.tokenUsageCost')}
-          value={formatTokenCosts(totals.costs)}
-          loading={loading}
-        />
+        {costCurrencies.length > 0 ?
+          costCurrencies.map((currency) => (
+            <TokenUsageCostMetric
+              key={currency}
+              label={`${t('dashboard.tokenUsageCost')} (${currency})`}
+              value={formatTokenCost(
+                totals.costs.find((cost) => cost.currency === currency),
+              )}
+              loading={loading}
+            />
+          ))
+        : <TokenUsageCostMetric
+            label={t('dashboard.tokenUsageCost')}
+            value={formatTokenCosts(totals.costs)}
+            loading={loading}
+          />
+        }
       </div>
 
       {period !== 'today' && (
@@ -1399,7 +1433,7 @@ function TokenUsagePanel({
             <div
               className={`h-44 overflow-auto ${loading ? 'opacity-60' : ''}`}
             >
-              <table className="w-full min-w-[860px] text-left text-[13px]">
+              <table className="w-full min-w-[960px] text-left text-[13px]">
                 <thead className="sticky top-0 bg-surface text-ink-faint">
                   <tr className="border-b border-line-soft">
                     <th className="px-2.5 py-1.5 font-semibold">
@@ -1419,6 +1453,9 @@ function TokenUsagePanel({
                     </th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">
                       {t('dashboard.tokenUsageCacheWrite')}
+                    </th>
+                    <th className="px-2.5 py-1.5 text-right font-semibold">
+                      {t('dashboard.tokenUsageCacheHitRate')}
                     </th>
                     <th className="px-2.5 py-1.5 text-right font-semibold">
                       {t('dashboard.tokenUsageTotalTokens')}
@@ -1929,6 +1966,9 @@ function TokenUsageModelRow({ model }: { model: TokenUsageModelSummary }) {
       </td>
       <td className="px-2.5 py-1.5 text-right text-ink-soft">
         {formatTokenCount(model.cache_creation_input_tokens)}
+      </td>
+      <td className="px-2.5 py-1.5 text-right text-ink-soft">
+        {formatCacheHitRate(model)}
       </td>
       <td className="px-2.5 py-1.5 text-right font-semibold text-ink">
         {formatTokenCount(calcTokenTotal(model))}
