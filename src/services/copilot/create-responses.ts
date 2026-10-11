@@ -27,6 +27,12 @@ import {
 } from "~/lib/copilot-rate-limit"
 import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
+import { isResponsesStream } from "~/lib/utils"
+import {
+  createAgentMessageFallbackStream,
+  createPlaintextAgentMessageFallback,
+  isEncryptedHistoryError,
+} from "~/services/copilot/responses-agent-message-fallback"
 import {
   createPooledWebSocketStream,
   createWebSocketUrl,
@@ -106,6 +112,7 @@ const createHttpResponses = async (
   payload: ResponsesPayload,
   headers: Record<string, string>,
   clientSignal?: AbortSignal,
+  allowAgentMessageFallback = true,
 ): Promise<CreateResponsesReturn> => {
   const transportConfig = getUpstreamTransportConfig()
   const response = await fetchUpstreamWithLifecycle(
@@ -125,15 +132,73 @@ const createHttpResponses = async (
   logCopilotRateLimits(response.headers)
 
   if (!response.ok) {
+    if (
+      response.status === 400
+      && payload.stream
+      && allowAgentMessageFallback
+    ) {
+      const fallback = createPlaintextAgentMessageFallback(payload)
+      if (fallback) {
+        const body: unknown = await response
+          .clone()
+          .json()
+          .catch(() => null)
+        if (
+          typeof body === "object"
+          && body !== null
+          && "error" in body
+          && isEncryptedHistoryError(body.error)
+        ) {
+          await response.body?.cancel()
+          logAgentMessageFallback(fallback.removedBlocks)
+          return await createHttpResponses(
+            fallback.payload,
+            headers,
+            clientSignal,
+            false,
+          )
+        }
+      }
+    }
     consola.error("Failed to create responses", response)
     throw new HTTPError("Failed to create responses", response)
   }
 
   if (payload.stream) {
-    return createResponsesSafeStream(createResponsesHttpEventStream(response))
+    const stream = createResponsesSafeStream(
+      createResponsesHttpEventStream(response),
+    )
+    if (!allowAgentMessageFallback) return stream
+    return createResponsesSafeStream(
+      createAgentMessageFallbackStream(
+        stream,
+        payload,
+        async (fallbackPayload) => {
+          const retried = await createHttpResponses(
+            fallbackPayload,
+            headers,
+            clientSignal,
+            false,
+          )
+          if (!isResponsesStream(retried)) {
+            throw new Error(
+              "Copilot plaintext agent-message retry did not return a stream",
+            )
+          }
+          return retried
+        },
+        logAgentMessageFallback,
+      ),
+    )
   }
 
   return (await response.json()) as ResponsesResult
+}
+
+const logAgentMessageFallback = (removedBlocks: number): void => {
+  consola.warn(
+    `Copilot rejected encrypted agent history; retrying once with plaintext agent messages (${removedBlocks} encrypted block(s) omitted)`,
+  )
 }
 
 type ResponsesWebSocketPayload = ResponsesPayload & {

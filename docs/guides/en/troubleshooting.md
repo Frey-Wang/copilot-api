@@ -18,6 +18,12 @@ When the GitHub Copilot provider returns or logs `Encrypted function output cont
 
 Restart the server after changing the config. See [Configuration (config.json)](configuration.md#configuration-configjson) for the full option reference.
 
+If this error continues with WebSocket disabled, try a fresh Codex conversation and newly created subagents instead of resuming the failing handoff history. The upstream may be rejecting encrypted history; repeating the same request does not repair that history. Successful reuse of a payload followed by rejection does not establish the upstream encryption key lifetime or scope.
+
+The upstream can send `response.failed` with no error details, followed by an `error` event containing `invalid_request_body` and the decryption message. Codex may stop at the failed event and display only `stream disconnected before completion: response.failed event received`. For HTTP streams, the gateway waits up to one second for the next event and attaches its error details to an otherwise empty failed response.
+
+For GitHub Copilot HTTP streaming, an initial rejection with that exact code and message triggers one retry using plaintext agent messages. This applies both to a failed stream event and to an HTTP 400 JSON error before streaming starts. Both paths share a single retry budget. Only encrypted content blocks in `agent_message` items with non-empty plaintext are omitted on the retry. Plaintext, message authors/recipients, tool results, reasoning, and compaction are retained, and the original request is not mutated. This may omit hidden handoff context that is not represented in the plaintext. Encrypted-only agent messages are not stripped, and failures after output starts or after the retry are forwarded without another attempt. WebSocket and non-streaming requests do not use this recovery.
+
 **Claude models missing from the GitHub Copilot model list**
 
 GitHub Copilot can return a different model list depending on the network location the gateway connects from. If your Copilot account has Claude models enabled but `/v1/models` lists no `claude-*` models and requests for them fail (for example with `model_not_supported`), route the gateway's upstream traffic through your proxy and restart it:

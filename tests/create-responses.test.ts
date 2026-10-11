@@ -9,7 +9,9 @@ import {
   prepareInteractionHeaders,
 } from "~/lib/api-config"
 import { COMPACT_REQUEST } from "~/lib/compact"
+import { HTTPError } from "~/lib/error"
 import { state } from "~/lib/state"
+import { isResponsesStream } from "~/lib/utils"
 import {
   buildResponsesWebSocketPoolKey,
   buildResponsesWebSocketPayload,
@@ -205,6 +207,323 @@ describe("createResponses", () => {
     expect(fetchMock.mock.calls[0]?.[1]?.body).toContain(
       '"encrypted_content":"encrypted-reasoning"',
     )
+  })
+
+  test("recovers HTTP encrypted agent-message rejection before forwarding lifecycle events", async () => {
+    const payload: ResponsesPayload = {
+      model: "gpt-test",
+      stream: true,
+      input: [
+        {
+          type: "agent_message",
+          author: "/root/reviewer",
+          recipient: "/root",
+          content: [
+            { type: "input_text", text: "Review results" },
+            {
+              type: "encrypted_content",
+              encrypted_content: "bad-encrypted-agent",
+            },
+          ],
+        },
+      ],
+    }
+    const encodeEvents = (events: Array<Record<string, unknown>>): Response =>
+      new Response(
+        events
+          .map(
+            (event) =>
+              `event: ${String(event.type)}\ndata: ${JSON.stringify(event)}\n\n`,
+          )
+          .join(""),
+        {
+          headers: { "content-type": "text/event-stream" },
+        },
+      )
+    const error = {
+      code: "invalid_request_body",
+      message:
+        "Encrypted function output content could not be decrypted or decoded.",
+    }
+    fetchMock.mockResolvedValueOnce(
+      encodeEvents([
+        { type: "response.created", response: { id: "first-response" } },
+        { type: "response.failed", response: { error: null } },
+        { type: "error", ...error },
+      ]),
+    )
+    fetchMock.mockResolvedValueOnce(
+      encodeEvents([
+        { type: "response.created", response: { id: "retry-response" } },
+        {
+          type: "response.completed",
+          response: createResponsesResult("gpt-test"),
+        },
+      ]),
+    )
+
+    const response = await createResponses(payload, {
+      initiator: "agent",
+      requestId: "request-1",
+      sessionId: "interaction-1",
+      vision: false,
+    })
+    expect(isResponsesStream(response)).toBe(true)
+    if (!isResponsesStream(response)) throw new Error("Expected stream")
+    const chunks = await Array.fromAsync(response)
+
+    expect(chunks.map((chunk) => chunk.event)).toEqual([
+      "response.created",
+      "response.completed",
+    ])
+    expect(chunks[0].data).toContain("retry-response")
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain("bad-encrypted-agent")
+    expect(fetchMock.mock.calls[1]?.[1]?.body).not.toContain(
+      "bad-encrypted-agent",
+    )
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toContain("Review results")
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual(
+      fetchMock.mock.calls[0]?.[1]?.headers,
+    )
+    expect(JSON.stringify(payload.input)).toContain("bad-encrypted-agent")
+  })
+
+  test("HTTP plaintext recovery stops after one unsuccessful retry", async () => {
+    const payload: ResponsesPayload = {
+      model: "gpt-test",
+      stream: true,
+      input: [
+        {
+          type: "agent_message",
+          author: "/root/reviewer",
+          recipient: "/root",
+          content: [
+            { type: "input_text", text: "Review results" },
+            {
+              type: "encrypted_content",
+              encrypted_content: "bad-encrypted-agent",
+            },
+          ],
+        },
+      ],
+    }
+    const failed = {
+      type: "response.failed",
+      response: {
+        error: {
+          code: "invalid_request_body",
+          message:
+            "Encrypted function output content could not be decrypted or decoded.",
+        },
+      },
+    }
+    for (const _attempt of [0, 1]) {
+      fetchMock.mockResolvedValueOnce(
+        new Response(
+          `event: response.failed\ndata: ${JSON.stringify(failed)}\n\n`,
+        ),
+      )
+    }
+    const response = await createResponses(payload, {
+      initiator: "agent",
+      requestId: "request-1",
+      vision: false,
+    })
+    if (!isResponsesStream(response)) throw new Error("Expected stream")
+    const chunks = await Array.fromAsync(response)
+
+    expect(chunks.map((chunk) => chunk.event)).toEqual(["response.failed"])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  test("recovers a pre-stream HTTP 400 encrypted agent-message rejection", async () => {
+    const payload: ResponsesPayload = {
+      model: "gpt-test",
+      stream: true,
+      input: [
+        {
+          type: "agent_message",
+          author: "/root/reviewer",
+          recipient: "/root",
+          content: [
+            { type: "input_text", text: "Review results" },
+            {
+              type: "encrypted_content",
+              encrypted_content: "bad-encrypted-agent",
+            },
+          ],
+        },
+      ],
+    }
+    fetchMock.mockResolvedValueOnce(
+      Response.json(
+        {
+          error: {
+            code: "invalid_request_body",
+            message:
+              "Encrypted function output content could not be decrypted or decoded.",
+          },
+        },
+        { status: 400 },
+      ),
+    )
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        `event: response.completed\ndata: ${JSON.stringify({ type: "response.completed", response: createResponsesResult("gpt-test") })}\n\n`,
+        { headers: { "content-type": "text/event-stream" } },
+      ),
+    )
+
+    const response = await createResponses(payload, {
+      initiator: "agent",
+      requestId: "request-1",
+      sessionId: "interaction-1",
+      vision: false,
+    })
+    if (!isResponsesStream(response)) throw new Error("Expected stream")
+    expect(
+      (await Array.fromAsync(response)).map((chunk) => chunk.event),
+    ).toEqual(["response.completed"])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock.mock.calls[1]?.[1]?.body).not.toContain(
+      "bad-encrypted-agent",
+    )
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toContain("Review results")
+    expect(fetchMock.mock.calls[1]?.[1]?.headers).toEqual(
+      fetchMock.mock.calls[0]?.[1]?.headers,
+    )
+    expect(JSON.stringify(payload.input)).toContain("bad-encrypted-agent")
+  })
+
+  test("preserves HTTP errors and limits pre-stream recovery to one retry", async () => {
+    const encryptedPayload: ResponsesPayload = {
+      model: "gpt-test",
+      stream: true,
+      input: [
+        {
+          type: "agent_message",
+          author: "/root/reviewer",
+          recipient: "/root",
+          content: [
+            { type: "input_text", text: "Review results" },
+            {
+              type: "encrypted_content",
+              encrypted_content: "bad-encrypted-agent",
+            },
+          ],
+        },
+      ],
+    }
+    const error = {
+      error: {
+        code: "invalid_request_body",
+        message:
+          "Encrypted function output content could not be decrypted or decoded.",
+      },
+    }
+    const cases = [
+      {
+        payload: encryptedPayload,
+        status: 400,
+        body: JSON.stringify(error),
+        attempts: 2,
+      },
+      {
+        payload: { ...encryptedPayload, stream: false },
+        status: 400,
+        body: JSON.stringify(error),
+        attempts: 1,
+      },
+      {
+        payload: { ...encryptedPayload, input: "hello" },
+        status: 400,
+        body: JSON.stringify(error),
+        attempts: 1,
+      },
+      {
+        payload: encryptedPayload,
+        status: 429,
+        body: JSON.stringify(error),
+        attempts: 1,
+      },
+      {
+        payload: encryptedPayload,
+        status: 400,
+        body: JSON.stringify({
+          error: { ...error.error, message: "Other invalid input" },
+        }),
+        attempts: 1,
+      },
+      { payload: encryptedPayload, status: 400, body: "not-json", attempts: 1 },
+    ]
+    for (const scenario of cases) {
+      fetchMock.mockClear()
+      for (let attempt = 0; attempt < scenario.attempts; attempt += 1) {
+        fetchMock.mockResolvedValueOnce(
+          new Response(scenario.body, { status: scenario.status }),
+        )
+      }
+      let caught: unknown
+      try {
+        await createResponses(scenario.payload, {
+          initiator: "agent",
+          requestId: "request-1",
+          vision: false,
+        })
+      } catch (error) {
+        caught = error
+      }
+      expect(caught).toBeInstanceOf(HTTPError)
+      if (caught instanceof HTTPError) {
+        expect(caught.response.status).toBe(scenario.status)
+        expect(await caught.response.text()).toBe(scenario.body)
+      }
+      expect(fetchMock).toHaveBeenCalledTimes(scenario.attempts)
+    }
+  })
+
+  test("shares one retry budget between HTTP and streamed failures", async () => {
+    const payload: ResponsesPayload = {
+      model: "gpt-test",
+      stream: true,
+      input: [
+        {
+          type: "agent_message",
+          author: "/root/reviewer",
+          recipient: "/root",
+          content: [
+            { type: "input_text", text: "Review results" },
+            {
+              type: "encrypted_content",
+              encrypted_content: "bad-encrypted-agent",
+            },
+          ],
+        },
+      ],
+    }
+    const error = {
+      code: "invalid_request_body",
+      message:
+        "Encrypted function output content could not be decrypted or decoded.",
+    }
+    fetchMock.mockResolvedValueOnce(Response.json({ error }, { status: 400 }))
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        `event: response.failed\ndata: ${JSON.stringify({ type: "response.failed", response: { error } })}\n\n`,
+      ),
+    )
+    const response = await createResponses(payload, {
+      initiator: "agent",
+      requestId: "request-1",
+      vision: false,
+    })
+    if (!isResponsesStream(response)) throw new Error("Expected stream")
+
+    expect(
+      (await Array.fromAsync(response)).map((chunk) => chunk.event),
+    ).toEqual(["response.failed"])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   test("builds the first websocket frame as response.create", () => {
